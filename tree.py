@@ -5,7 +5,7 @@ UNK = 'UNK'
 
 class Node:
     def __init__(self,label,word=None):
-        self.label = label 
+        self.label = label
         self.word = word
         self.parent = None
         self.left = None
@@ -30,7 +30,7 @@ class Tree:
         split = 2 # position after open and label
         countOpen = countClose = 0
 
-        if tokens[split] == self.open: 
+        if tokens[split] == self.open:
             countOpen += 1
             split += 1
         # Find where left child and right child split
@@ -43,7 +43,7 @@ class Tree:
 
         # New node
         node = Node(int(tokens[1])-1) # zero index labels
-        node.parent = parent 
+        node.parent = parent
 
         # leaf Node
         if countOpen == 0:
@@ -55,12 +55,12 @@ class Tree:
         node.right = self.parse(tokens[split:-1],parent=node)
         return node
 
-        
+
 
 def leftTraverse(root,nodeFn=None,args=None):
     """
     Recursive function traverses tree
-    from left to right. 
+    from left to right.
     Calls nodeFn at each node
     """
     nodeFn(root,args)
@@ -85,24 +85,41 @@ def loadWordMap():
     with open('wordMap.bin','r') as fid:
         return pickle.load(fid)
 
+# Get the tree instance of all sentences from the dataset
 def buildWordMap():
     """
     Builds map of all words in training set
     to integer values.
     """
+
     import cPickle as pickle
     file = 'trees/train.txt'
     print "Reading trees.."
     with open(file,'r') as fid:
         trees = [Tree(l) for l in fid.readlines()]
 
+    # debug
+    """print "debug0"
+    print trees[0]
+    print type(trees[0]).__name__
+    print trees[0].__class__.__name__
+    print vars(trees[0])
+    print vars(trees[1])
+    fds"""
+
+
     print "Counting words.."
     words = collections.defaultdict(int)
     for tree in trees:
         leftTraverse(tree.root,nodeFn=countWords,args=words)
-    
+
     wordMap = dict(zip(words.iterkeys(),xrange(len(words))))
     wordMap[UNK] = len(words) # Add unknown as word
+
+    # debug
+    """"print "debug1"
+    print wordMap["awesome"]
+    fds"""
 
     with open('wordMap.bin','w') as fid:
         pickle.dump(wordMap,fid)
@@ -112,14 +129,15 @@ def loadTrees(dataSet='train'):
     Loads training trees. Maps leaf node words to word ids.
     """
     wordMap = loadWordMap()
-    file = 'trees/%s.txt'%dataSet
+    #file = 'trees/%s.txt'%dataSet
+    file = 'trees/SICK_train_parsed_sample.txt'
     print "Reading trees.."
     with open(file,'r') as fid:
         trees = [Tree(l) for l in fid.readlines()]
     for tree in trees:
         leftTraverse(tree.root,nodeFn=mapWords,args=wordMap)
     return trees
-      
+
 if __name__=='__main__':
     buildWordMap()
     train = loadTrees()
