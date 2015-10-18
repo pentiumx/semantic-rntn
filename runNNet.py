@@ -3,7 +3,8 @@ import cPickle as pickle
 
 import sgd as optimizer
 import rntn as nnet
-import tree as tr
+import tree_rte as tr
+import rnn_entailment as nnet_rte
 import time
 
 def run(args=None):
@@ -16,10 +17,11 @@ def run(args=None):
     parser.add_option("--minibatch",dest="minibatch",type="int",default=30)
     parser.add_option("--optimizer",dest="optimizer",type="string",
         default="adagrad")
-    parser.add_option("--epochs",dest="epochs",type="int",default=50)
+    parser.add_option("--epochs",dest="epochs",type="int",default=500)#50
     parser.add_option("--step",dest="step",type="float",default=1e-2)
 
-    parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
+    #parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
+    parser.add_option("--outputDim",dest="outputDim",type="int",default=3)  # ENTAILMENT, NEUTRAL, CONTRADICTION for SICK dataset
     parser.add_option("--wvecDim",dest="wvecDim",type="int",default=30)
     parser.add_option("--outFile",dest="outFile",type="string",
         default="models/test.bin")
@@ -40,7 +42,8 @@ def run(args=None):
     trees = tr.loadTrees()
     opts.numWords = len(tr.loadWordMap())
 
-    rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
+    #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
+    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
     rnn.initParams()
 
     sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
@@ -59,12 +62,15 @@ def run(args=None):
             rnn.toFile(fid)
 
 def test(netFile,dataSet):
-    trees = tr.loadTrees(dataSet)
+    #trees = tr.loadTrees(dataSet)
+    trees = tr.loadTrees('dev')
     assert netFile is not None, "Must give model to test"
     with open(netFile,'r') as fid:
         opts = pickle.load(fid)
         _ = pickle.load(fid)
-        rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
+        #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
+        opts.outputDim=3
+        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
         rnn.initParams()
         rnn.fromFile(fid)
     print "Testing..."

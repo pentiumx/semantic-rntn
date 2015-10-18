@@ -37,7 +37,7 @@ class Tree:
         # Remove all whitespaces from the start and end of the treeString.
         # Then split the string by space.
         for toks in treeString.strip().split():
-            print toks
+            #print toks
             tokens += list(toks)
 
         # Remove the top parenthesis
@@ -46,7 +46,6 @@ class Tree:
 
         # tokens[1:-1] is not necessary cuz we set split=1 in the parse method
         self.root = self.parse(tokens)
-        print 'test'
 
 
     """def parse(self, tokens, parent=None, is_leaf=None):
@@ -112,9 +111,6 @@ class Tree:
         #split = 1 # position after open
         # position after open and label
         split = 1
-        #print tokens
-        if tokens == '(NNS kids)':
-            print 'debug'
         """while tokens[split] != ' ':
             split += 1
         split += 1
@@ -141,15 +137,17 @@ class Tree:
 
         # leaf Node
         if countOpen == 0:
-            print tokens
+        # DEBUG
+        #    print tokens
 
             #node.word = ''.join(tokens[2:-1]).lower() # lower case?
             node.word = ''.join(tokens[1:-1]).lower() # lower case?
             node.isLeaf = True
             return node
-        else:
-            print tokens[1:split]
-            print tokens[split:-1]
+        #else:
+        # DEBUG
+        #    print tokens[1:split]
+        #    print tokens[split:-1]
 
 
         node.left = self.parse(tokens[1:split],parent=node)
@@ -239,7 +237,7 @@ def buildWordMap():
     import cPickle as pickle
     #file = 'trees/train.txt'
     #file = 'trees/SICK_train_parsed_sample.txt'
-    file = 'trees/SICK_parsed'
+    file = 'trees/train_parsed'
     print "Reading trees.."
 
     """with open(file,'r') as fid:
@@ -268,11 +266,12 @@ def buildWordMap():
 
 # For creating TreePair instances.
 def inputarray(lines):
+    labels = {'ENTAILMENT':0, 'NEUTRAL':1, 'CONTRADICTION':2}
     for l in lines:
         tmp = l.split('\t')
         # Note the order of arguments.
         # Change below depends on your RTE dataset.
-        yield TreePair(Tree(tmp[1]), Tree(tmp[2]), tmp[0], tmp[3], tmp[4])
+        yield TreePair(Tree(tmp[1]), Tree(tmp[2]), labels[tmp[0]], tmp[3], tmp[4])
 
 
 def loadTrees(dataSet='train'):
@@ -280,9 +279,10 @@ def loadTrees(dataSet='train'):
     Loads training trees. Maps leaf node words to word ids.
     """
     wordMap = loadWordMap()
-    #file = 'trees/%s.txt'%dataSet
+    file = 'trees/%s_parsed'%dataSet
+    print file
     #file = 'trees/SICK_train_parsed_sample.txt'
-    file = 'trees/SICK_parsed'
+    #file = 'trees/train_parsed'
     print "Reading trees.."
 
     with open(file, 'r') as fid:
@@ -291,10 +291,11 @@ def loadTrees(dataSet='train'):
         tree_pairs = l
 
 
-    # Run mapWords on each node
-    #for tree_pair in tree_pairs:
-    #    leftTraverse(tree_pair.tree1.root,nodeFn=mapWords,args=wordMap)
-    #    leftTraverse(tree_pair.tree2.root,nodeFn=mapWords,args=wordMap)
+    # Run mapWords on each node.
+    # Comment out this section when you need to check pygraphviz tree visualization.
+    for tree_pair in tree_pairs:
+        leftTraverse(tree_pair.tree1.root,nodeFn=mapWords,args=wordMap)
+        leftTraverse(tree_pair.tree2.root,nodeFn=mapWords,args=wordMap)
     return tree_pairs
 
 if __name__=='__main__':
