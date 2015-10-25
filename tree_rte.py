@@ -228,22 +228,25 @@ def loadWordMap():
         return pickle.load(fid)
 
 # Get the tree instance of all sentences from the dataset
-def buildWordMap():
+def buildWordMap(dataSet='sick', data='train_parsed'):
     """
     Builds map of all words in training set
     to integer values.
     """
 
     import cPickle as pickle
-    #file = 'trees/train.txt'
-    #file = 'trees/SICK_train_parsed_sample.txt'
-    file = 'trees/train_parsed'
+    file = 'trees/%s_%s' % (dataSet, data)
+    #file = 'trees/train_parsed'
+    #file = 'trees/train_parsed_debug'
     print "Reading trees.."
 
     """with open(file,'r') as fid:
         trees = [Tree(l) for l in fid.readlines()]"""
     with open(file,'r') as fid:
-        l = list(inputarray(fid.readlines()))
+        if dataSet == 'sick':
+            l = list(inputarray(fid.readlines()))
+        elif dataSet == 'quant':
+            l = list(input_quant(fid.readlines()))
         tree_pairs = l#TreePair(l[0], l[1], l[2], l[3])
 
     print "Counting words.."
@@ -273,21 +276,33 @@ def inputarray(lines):
         # Change below depends on your RTE dataset.
         yield TreePair(Tree(tmp[1]), Tree(tmp[2]), labels[tmp[0]], tmp[3], tmp[4])
 
+def input_quant(lines):
+    labels = {'<':0, '>':1, '=':2, '|':3, '^':4, 'v':5, '#':6}
+    for l in lines:
+        tmp = l.split('\t')
+        # Note the order of arguments.
+        # Change below depends on your RTE dataset.
+        yield TreePair(Tree(tmp[1]), Tree(tmp[2]), labels[tmp[0]])
 
-def loadTrees(dataSet='train'):
+
+def loadTrees(dataSet='sick', data='train_parsed'):
     """
     Loads training trees. Maps leaf node words to word ids.
     """
     wordMap = loadWordMap()
-    file = 'trees/%s_parsed'%dataSet
-    print file
-    #file = 'trees/SICK_train_parsed_sample.txt'
+    file = 'trees/%s_%s' % (dataSet, data)
+
+    #file = 'trees/train_parsed_debug'
     #file = 'trees/train_parsed'
+    print file
     print "Reading trees.."
 
     with open(file, 'r') as fid:
         #trees = [Tree(l) for l in fid.readlines()]
-        l = list(inputarray(fid.readlines()))
+        if dataSet == 'sick':
+            l = list(inputarray(fid.readlines()))
+        elif dataSet == 'quant':
+            l = list(input_quant(fid.readlines()))
         tree_pairs = l
 
 
@@ -296,11 +311,13 @@ def loadTrees(dataSet='train'):
     for tree_pair in tree_pairs:
         leftTraverse(tree_pair.tree1.root,nodeFn=mapWords,args=wordMap)
         leftTraverse(tree_pair.tree2.root,nodeFn=mapWords,args=wordMap)
-    return tree_pairs
+    return tree_pairs, wordMap
 
 if __name__=='__main__':
-    buildWordMap()
-    train = loadTrees()
+    #buildWordMap('quant','train_parsed')
+    buildWordMap('sick','train_parsed')
+    #train, vocab = loadTrees('quant', 'train_parsed')
+    train, vocab = loadTrees('sick', 'train_parsed')
     debug_tree(train[0].tree1.root)
 
 
