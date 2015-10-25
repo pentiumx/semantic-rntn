@@ -115,7 +115,7 @@ class RNN:
             # Relu
             node.hActs[node.hActs<0] = 0
 
-        # Softmax
+        """"""# Softmax
         node.probs = np.dot(self.Ws,node.hActs) + self.bs
         node.probs -= np.max(node.probs)
         node.probs = np.exp(node.probs)
@@ -137,29 +137,32 @@ class RNN:
         self.dWs += np.outer(deltas,node.hActs)
         self.dbs += deltas
         deltas = np.dot(self.Ws.T,deltas)"""
+
         # self.deltas is already calculated
-        deltas = self.deltas    # self.deltas is wvecDim
+        # [NOTE: DO NOT assign the instance itself. make sure to create a deep copied value!!!]
+        deltas_local = np.empty_like(self.deltas)
+        deltas_local[:] = self.deltas    # self.deltas has wvecDim
 
         if error is not None:
-            deltas += error
+            deltas_local += error
 
         #if deltas.size != 30:#node.hActs.size != 30:
         #    print 'test'
-        deltas *= (node.hActs != 0)
+        deltas_local *= (node.hActs != 0)
 
 
         # Leaf nodes update word vecs
         if node.isLeaf:
-            self.dL[node.word] += deltas
+            self.dL[node.word] += deltas_local
             return
 
         # Hidden grad
         if not node.isLeaf:
-            self.dW += np.outer(deltas,
+            self.dW += np.outer(deltas_local,
                     np.hstack([node.left.hActs, node.right.hActs]))
-            self.db += deltas
+            self.db += deltas_local
             # Error signal to children
-            deltas = np.dot(self.W.T, deltas) # deltas.size = wvecDim*2 at this point
+            deltas = np.dot(self.W.T, deltas_local) # deltas.size = wvecDim*2 at this point
             self.backProp(node.left, deltas[:self.wvecDim])
             self.backProp(node.right, deltas[self.wvecDim:])
 

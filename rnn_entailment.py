@@ -24,7 +24,16 @@ class RNNRTE:
     def initParams(self):
 
         # Word vectors
-        self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)
+        self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)# why not [numWords, wvecDim]?
+
+        # embedding transformation layer weights
+        # embeddingDim = word2vec dim, wvecDim = composition layer's word vec dim.
+        #self.We = 0.01*np.random.rand(self.wvecDim, self.embeddingDim)
+        #self.be = np.zeros((self.wvecDim))
+
+        # Comparison layer weights
+        self.Wc = 0.01*np.random.randn(self.wvecDim,2*self.wvecDim)
+        self.bc = np.zeros((self.wvecDim))
 
         # Hidden activation weights
         self.W = 0.01*np.random.randn(self.wvecDim,2*self.wvecDim)
@@ -34,13 +43,15 @@ class RNNRTE:
         self.Ws = 0.01*np.random.randn(self.outputDim,self.wvecDim)
         self.bs = np.zeros((self.outputDim))
 
-        self.stack = [self.L, self.W, self.b, self.Ws, self.bs]
+        self.stack = [self.L, self.W, self.b, self.Ws, self.bs, self.Wc, self.bc]
 
         # Gradients
         self.dW = np.empty(self.W.shape)
         self.db = np.empty((self.wvecDim))
         self.dWs = np.empty(self.Ws.shape)
         self.dbs = np.empty((self.outputDim))
+        self.dWc = np.empty(self.W.shape)
+        self.dbc = np.empty((self.wvecDim))
 
 
     def costAndGrad(self,mbdata,test=False):
@@ -59,12 +70,14 @@ class RNNRTE:
         correct = 0.0
         total = 0.0
 
-        self.L,self.W,self.b,self.Ws,self.bs = self.stack
+        self.L,self.W,self.b,self.Ws,self.bs,self.Wc,self.bc = self.stack
         # Zero gradients
         self.dW[:] = 0
         self.db[:] = 0
         self.dWs[:] = 0
         self.dbs[:] = 0
+        self.dWc[:] = 0
+        self.dbc[:] = 0
         self.dL = collections.defaultdict(self.defaultVec)
 
         # Initialize dL and other params of each rnn
@@ -73,7 +86,7 @@ class RNNRTE:
 
         # Forward prop each tree in minibatch
         for tree_pair in mbdata:
-            c,corr,tot = self.forward_prop_all(tree_pair)
+            c,corr,tot = self.forward_prop_all(tree_pair, test)
 
             cost += c
             correct += corr
@@ -93,23 +106,28 @@ class RNNRTE:
         # Add L2 Regularization
         cost += (self.rho/2)*np.sum(self.W**2)
         cost += (self.rho/2)*np.sum(self.Ws**2)
+        cost += (self.rho/2)*np.sum(self.Wc**2)
 
         return scale*cost,[self.dL,scale*(self.dW + self.rho*self.W),scale*self.db,
-                           scale*(self.dWs+self.rho*self.Ws),scale*self.dbs]
+                           scale*(self.dWs+self.rho*self.Ws),scale*self.dbs,scale*(self.dWc+self.rho*self.Wc),scale*self.dbc]
 
 
-    def forward_prop_all(self, tree_pair):
+    def forward_prop_all(self, tree_pair, test=False):
         cost = correct =  total = 0.0
 
         # Get the feature of both sentences
         # TODO: do some additional initializations to each rnn's parameters?
+
+        # sent_left/sent_right: Node class. we need to use sent_left.hActs for using representation!!!
         sent_left = self.rnn_left.forwardProp(tree_pair.tree1.root)
         sent_right = self.rnn_right.forwardProp(tree_pair.tree2.root)
 
-        # Propagate to the comparison layer
+        # Propagate to the comparison layer.
+        # Use the representations!
         # Affine
-        hActs = np.dot(self.W,
-                np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.right.hActs])) + self.b
+        hActs = np.dot(self.Wc,
+                np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])) + self.bc
+                #np.hstack([sent_left.hActs, sent_right.hActs])) + self.bc
         # Relu
         hActs[hActs<0] = 0
 
@@ -121,8 +139,10 @@ class RNNRTE:
 
         # TODO: Create a class for softmax layer
         # Save softmax layer values as member vars (temporary solution)
-        self.probs = probs
-        self.hActs = hActs
+        #self.probs = probs
+        tree_pair.probs = probs
+        tree_pair.hActs = hActs
+        if test: print probs
 
         label = tree_pair.label
 
@@ -159,31 +179,48 @@ class RNNRTE:
 
     def back_prop_all(self, tree_pair):
         # Softmax layer grad
-        self.deltas = self.probs
-        self.deltas[tree_pair.label] -= 1.0
-        self.dWs += np.outer(self.deltas, self.hActs)
+        # cross entropy error: dE/da = y-t = deltas
+        # E.g. [0.11, 0.0008, 0.5] - [0, 1, 0]
+        self.deltas = tree_pair.probs
+        self.deltas[tree_pair.label] -= 1.0 # target value = 1
+        # derivative of weights(softmax layer):
+        # dE/dw = delta*z = deltas*hActs
+        self.dWs += np.outer(self.deltas, tree_pair.hActs)
         self.dbs += self.deltas
-        self.deltas = np.dot(self.Ws.T,self.deltas)
 
+
+        # Comparison layer grad
+        # derivative of weights(comparison hidden layer)
+        # delta_j = h'(a_j)*sigma_k(w_kj*delta_k)
+        # delta^(l)=h'(a)*sum(w*delta^(l+1)
+        # (for calc) => delta^(l) = W^(l).T * delta^(l+1) (element-wise *) f'(z^(l))
+        self.deltas = np.dot(self.Ws.T,self.deltas)
 
         # TODO: Save splitted deltas into a custom comparison layer class
         #self.deltas_left = self.deltas[:self.wvecDim]
         #self.deltas_right = self.deltas[self.wvecDim:]
-
         #if self.rnn_left.deltas.size != 30 or self.rnn_right.deltas != 30:
-        #    print 'bug'
+        #    print 'debug'
 
-        # Comparison layer grad
-        self.dW += np.outer(self.deltas,
+        error=None
+        if error is not None:
+            self.deltas += error
+        self.deltas *= (tree_pair.hActs != 0)
+        # not a leaf node:
+        self.dWc += np.outer(self.deltas,
                     np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]))
-        self.db += self.deltas
+        self.dbc += self.deltas
+
 
         # added
-        self.deltas = np.dot(self.W.T,self.deltas)
-        self.rnn_left.deltas = self.deltas[:self.wvecDim]
-        self.rnn_right.deltas = self.deltas[self.wvecDim:]
+        self.deltas = np.dot(self.Wc.T,self.deltas)
+        # NOTE: make sure to create deep copy
+        self.rnn_left.deltas = np.empty_like(self.deltas[:self.wvecDim])
+        self.rnn_left.deltas[:] = self.deltas[:self.wvecDim]
+        self.rnn_right.deltas = np.empty_like(self.deltas[self.wvecDim:])
+        self.rnn_right.deltas[:] = self.deltas[self.wvecDim:]
 
-        # Composition layers grad
+        # Composition layers grad. dL, dW, db will be calculated.
         self.rnn_left.backProp(tree_pair.tree1.root)
         self.rnn_right.backProp(tree_pair.tree2.root)
 
@@ -234,20 +271,30 @@ class RNNRTE:
                 dpRMS = np.sqrt(np.mean((scale*dP)**2))
                 print "weight rms=%f -- update rms=%f"%(pRMS,dpRMS)
 
+        #print self.stack[1]
         self.stack[1:] = [P+scale*dP for P,dP in zip(self.stack[1:],update[1:])]
-
+        #print self.stack[1]
         # handle dictionary update sparsely
         dL = update[0]
         for j in dL.iterkeys():
             self.L[:,j] += scale*dL[j]
 
-    def toFile(self,fid):
+    def toFile(self,fid, last=False):
         import cPickle as pickle
         pickle.dump(self.stack,fid)
+        if last:
+            print self.stack[0][:,467]
+            #print self.stack[0]
+            #print self.stack[1]
+            #print self.stack[4]
 
     def fromFile(self,fid):
         import cPickle as pickle
         self.stack = pickle.load(fid)
+        #print self.stack
+        print self.stack[0]
+        #print self.stack[1]
+        #print self.stack[4]
 
     def check_grad(self,data,epsilon=1e-6):
 
@@ -281,7 +328,7 @@ class RNNRTE:
 if __name__ == '__main__':
 
     import tree_rte as treeM
-    train = treeM.loadTrees()
+    train,vocab = treeM.loadTrees()
     numW = len(treeM.loadWordMap())
 
     wvecDim = 10
