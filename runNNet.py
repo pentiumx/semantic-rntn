@@ -44,13 +44,18 @@ def run(args=None):
     trees, vocab = tr.loadTrees(opts.dataset,opts.data)
     opts.numWords = len(tr.loadWordMap())
 
-    #print "Loading word2vec..."
+
+    print "Loading word2vec vectors..."
+    # Load pre-built word matrix using cPickle
     #w2v_file = "/Users/pentiumx/Projects/word2vec/GoogleNews-vectors-negative300.bin"
     #word_vecs = process_data.load_bin_vec(w2v_file, vocab)
+    x = pickle.load(open("mr.p","rb"))
+    #revs, W, W2, word_idx_map, vocab = x[0], x[1], x[2], x[3], x[4]
+    W = x[0]
 
     #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
     rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
-    rnn.initParams()
+    rnn.initParams(W)
 
     sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
         optimizer=opts.optimizer)
@@ -80,7 +85,7 @@ def test(netFile,data, dataset):
         opts = pickle.load(fid)
         _ = pickle.load(fid)
         #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
-        opts.outputDim=7
+
         rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
         rnn.initParams()
         rnn.fromFile(fid)
