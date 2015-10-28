@@ -1,7 +1,6 @@
 import numpy as np
 import collections
 import rnn as rnn
-import cPickle as pickle
 
 # RNN for textual entailment task.
 # Compute the word vectors for two sentences, and merge them at the comparison NN layer.
@@ -15,18 +14,26 @@ class RNNRTE:
         self.mbSize = mbSize
         self.defaultVec = lambda : np.zeros((wvecDim,))
         self.rho = rho
+        # Init the composition layers
+        self.rnn_left = rnn.RNN(wvecDim,outputDim,numWords,mbSize,rho)
+        self.rnn_right = rnn.RNN(wvecDim,outputDim,numWords,mbSize,rho)
+
 
 
     # Init params for the comparison layer
     def initParams(self, W):
+        #self.rnn_left.initParams(W)
+        #self.rnn_right.initParams(W)
+
         # Word vectors
         #self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)# why not [numWords, wvecDim]?
         self.L = W
 
+
         # embedding transformation layer weights
         # embeddingDim = word2vec dim, wvecDim = composition layer's word vec dim.
         self.We = 0.01*np.random.rand(self.wvecDim, self.embeddingDim)
-        self.be = np.zeros((self.wvecDim))
+        self.be = np.zeros((self.embeddingDim))
 
         # Comparison layer weights
         self.Wc = 0.01*np.random.randn(self.wvecDim,2*self.wvecDim)
@@ -50,7 +57,7 @@ class RNNRTE:
         self.dWc = np.empty(self.W.shape)
         self.dbc = np.empty((self.wvecDim))
         self.dWe = np.empty(self.We.shape)
-        self.dbe = np.empty((self.wvecDim))
+        self.dbe = np.empty((self.embeddingDim))
 
 
 
@@ -70,11 +77,7 @@ class RNNRTE:
         correct = 0.0
         total = 0.0
 
-        #if not test:
         self.L,self.W,self.b,self.Ws,self.bs,self.Wc,self.bc,self.We,self.be = self.stack
-        #else:
-        #    # Other than word2vec vectors.
-        #    self.W,self.b,self.Ws,self.bs,self.Wc,self.bc,self.We,self.be = self.stack[1:]
         # Zero gradients
         self.dW[:] = 0
         self.db[:] = 0
@@ -109,11 +112,10 @@ class RNNRTE:
         for v in self.dL.itervalues():
             v *=scale
 
-        # Add L2 Regularizations
+        # Add L2 Regularization
         cost += (self.rho/2)*np.sum(self.W**2)
         cost += (self.rho/2)*np.sum(self.Ws**2)
         cost += (self.rho/2)*np.sum(self.Wc**2)
-        cost += (self.rho/2)*np.sum(self.We**2)
 
         return scale*cost,[self.dL,scale*(self.dW + self.rho*self.W),scale*self.db,
                            scale*(self.dWs+self.rho*self.Ws),scale*self.dbs,scale*(self.dWc+self.rho*self.Wc),scale*self.dbc,scale*(self.dWe+self.rho*self.We),scale*self.dbe]
@@ -126,6 +128,8 @@ class RNNRTE:
         # TODO: do some additional initializations to each rnn's parameters?
 
         # sent_left/sent_right: Node class. we need to use sent_left.hActs for using representation!!!
+        #sent_left = self.rnn_left.forwardProp(tree_pair.tree1.root)
+        #sent_right = self.rnn_right.forwardProp(tree_pair.tree2.root)
         sent_left = self.forwardProp(tree_pair.tree1.root)
         sent_right = self.forwardProp(tree_pair.tree2.root)
 
@@ -162,9 +166,7 @@ class RNNRTE:
         cost = correct =  total = 0.0
 
         if node.isLeaf:
-            # Transform word vector to embeddingTransform layer.
-            #node.hActs = self.L[:,node.word]
-            node.hActs = np.dot(self.We, self.L[node.word]) + self.be
+            node.hActs = self.L[:,node.word]
             node.fprop = True
 
         else:
@@ -248,6 +250,8 @@ class RNNRTE:
         self.backProp(tree_pair.tree1.root,self.deltas_left)
         self.backProp(tree_pair.tree2.root,self.deltas_right)
 
+
+    # NOT USED
     def backProp(self,node,deltas,error=None):
 
         # Clear nodes
@@ -275,13 +279,7 @@ class RNNRTE:
 
         # Leaf nodes update word vecs
         if node.isLeaf:
-            #self.dL[node.word] += deltas_local
-            deltas = np.dot(self.We.T, deltas_local)
-            deltas_local *= (node.hActs != 0)
-            self.dWe += np.outer(deltas_local,
-                    #np.hstack([node.left.hActs, node.right.hActs]))
-                    self.L[node.word]) # this layer has no split
-            self.dbe += deltas_local
+            self.dL[node.word] += deltas_local
             return
 
         # Hidden grad
@@ -312,17 +310,15 @@ class RNNRTE:
         self.stack[1:] = [P+scale*dP for P,dP in zip(self.stack[1:],update[1:])]
         #print self.stack[1]
         # handle dictionary update sparsely
-        # don't update it while we're using word2vec vectors
-        """dL = update[0]
+        dL = update[0]
         for j in dL.iterkeys():
-            self.L[:,j] += scale*dL[j]"""
+            self.L[:,j] += scale*dL[j]
 
     def toFile(self,fid, last=False):
         import cPickle as pickle
         pickle.dump(self.stack,fid)
         if last:
-            print ''
-            #print self.stack[0][:,467]
+            print self.stack[0][:,467]
             #print self.stack[0]
             #print self.stack[1]
             #print self.stack[4]
@@ -331,7 +327,7 @@ class RNNRTE:
         import cPickle as pickle
         self.stack = pickle.load(fid)
         #print self.stack
-        #print self.stack[0]
+        print self.stack[0]
         #print self.stack[1]
         #print self.stack[4]
 
@@ -351,9 +347,8 @@ class RNNRTE:
                     err = np.abs(dW[i,j] - numGrad)
                     print "Analytic %.9f, Numerical %.9f, Relative Error %.9f"%(dW[i,j],numGrad,err)
 
-        # This model uses word2vec
         # check dL separately since dict
-        """dL = grad[0]
+        dL = grad[0]
         L = self.stack[0]
         for j in dL.iterkeys():
             for i in xrange(L.shape[0]):
@@ -363,7 +358,7 @@ class RNNRTE:
                 numGrad = (costP - cost)/epsilon
                 err = np.abs(dL[j][i] - numGrad)
                 print "Analytic %.9f, Numerical %.9f, Relative Error %.9f"%(dL[j][i],numGrad,err)
-        """
+
 
 if __name__ == '__main__':
 
@@ -375,10 +370,8 @@ if __name__ == '__main__':
     outputDim = 5
     print numW
 
-    x = pickle.load(open("mr.p","rb"))
-    W = x[0]
-    rnn = RNNRTE(wvecDim,outputDim,300,numW,mbSize=4)
-    rnn.initParams(W)
+    rnn = RNNRTE(wvecDim,outputDim,numW,mbSize=4)
+    rnn.initParams()
 
     mbData = train[:4]
 

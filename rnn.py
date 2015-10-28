@@ -3,21 +3,24 @@ import collections
 
 class RNN:
 
-    def __init__(self,wvecDim,outputDim,numWords,mbSize=30,rho=1e-4):
+    def __init__(self,wvecDim,outputDim,embeddingDim,numWords,mbSize=30,rho=1e-4):
         self.wvecDim = wvecDim
         self.outputDim = outputDim
+        self.embeddingDim = embeddingDim
         self.numWords = numWords
         self.mbSize = mbSize
         self.defaultVec = lambda : np.zeros((wvecDim,))
         self.rho = rho
 
-    def initParams(self):
-        ##########################################
-        # TODO: Initialize with word2vec vectors.
-        ##########################################
-
+    def initParams(self, W):
         # Word vectors
-        self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)
+        #self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)
+        self.L = W
+
+        # embedding transformation layer weights
+        # embeddingDim = word2vec dim, wvecDim = composition layer's word vec dim.
+        self.We = 0.01*np.random.rand(self.wvecDim, self.embeddingDim)
+        self.be = np.zeros((self.embeddingDim))
 
         # Hidden activation weights
         self.W = 0.01*np.random.randn(self.wvecDim,2*self.wvecDim)
@@ -27,13 +30,15 @@ class RNN:
         self.Ws = 0.01*np.random.randn(self.outputDim,self.wvecDim)
         self.bs = np.zeros((self.outputDim))
 
-        self.stack = [self.L, self.W, self.b, self.Ws, self.bs]
+        self.stack = [self.L, self.W, self.b, self.Ws, self.bs, ]
 
         # Gradients
         self.dW = np.empty(self.W.shape)
         self.db = np.empty((self.wvecDim))
         self.dWs = np.empty(self.Ws.shape)
         self.dbs = np.empty((self.outputDim))
+        self.dWe = np.empty(self.Wc.shape)
+        self.dbe = np.empty((self.embeddingDim))
 
     def init_param_grads(self):
         self.L,self.W,self.b,self.Ws,self.bs = self.stack
@@ -225,7 +230,6 @@ class RNN:
 
 
 if __name__ == '__main__':
-
     import tree as treeM
     train = treeM.loadTrees()
     numW = len(treeM.loadWordMap())

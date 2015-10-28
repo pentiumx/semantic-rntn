@@ -7,6 +7,7 @@ import tree_rte as tr
 import rnn_entailment as nnet_rte
 import process_data as process_data
 import time
+import numpy as np
 
 def run(args=None):
     usage = "usage : %prog [options]"
@@ -15,10 +16,10 @@ def run(args=None):
     parser.add_option("--test",action="store_true",dest="test",default=False)
 
     # Optimizer
-    parser.add_option("--minibatch",dest="minibatch",type="int",default=10)#30
+    parser.add_option("--minibatch",dest="minibatch",type="int",default=30)#30
     parser.add_option("--optimizer",dest="optimizer",type="string",
         default="adagrad")
-    parser.add_option("--epochs",dest="epochs",type="int",default=50)#50
+    parser.add_option("--epochs",dest="epochs",type="int",default=500)#50
     parser.add_option("--step",dest="step",type="float",default=1e-2)
 
     #parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
@@ -49,13 +50,18 @@ def run(args=None):
     # Load pre-built word matrix using cPickle
     #w2v_file = "/Users/pentiumx/Projects/word2vec/GoogleNews-vectors-negative300.bin"
     #word_vecs = process_data.load_bin_vec(w2v_file, vocab)
-    x = pickle.load(open("mr.p","rb"))
     #revs, W, W2, word_idx_map, vocab = x[0], x[1], x[2], x[3], x[4]
+
+    x = pickle.load(open("mr.p","rb"))
     W = x[0]
+    W2 = 0.01*np.random.randn(opts.wvecDim,opts.numWords)
+    #opts.wvecDim=300
 
     #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
-    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
-    rnn.initParams(W)
+    # embeddingDim=30 for now
+    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,300,opts.numWords,opts.minibatch)
+    rnn.initParams(W)   # Use W2 for experiments with randomly initialized vectors
+
 
     sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
         optimizer=opts.optimizer)
@@ -86,8 +92,11 @@ def test(netFile,data, dataset):
         _ = pickle.load(fid)
         #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
 
-        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
-        rnn.initParams()
+        x = pickle.load(open("mr.p","rb"))
+        W = x[0]
+        W2 = 0.01*np.random.randn(opts.wvecDim,opts.numWords)
+        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,300,opts.numWords,opts.minibatch)
+        rnn.initParams(W)
         rnn.fromFile(fid)
     print "Testing..."
     cost,correct,total = rnn.costAndGrad(trees,test=True)

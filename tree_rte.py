@@ -49,6 +49,7 @@ class Tree:
 
         # tokens[1:-1] is not necessary cuz we set split=1 in the parse method
         self.root = self.parse(tokens)
+        a=1
 
 
     """def parse(self, tokens, parent=None, is_leaf=None):
@@ -308,7 +309,7 @@ def get_W(word_vecs, word_map, idx_word_map, k=300):
     #W[0] = np.zeros(k)
 
     for i in range(0,len(idx_word_map)):
-        W[i] = word_vecs[idx_word_map[i]]
+         W[i] = word_vecs[idx_word_map[i]]
         #word_idx_map[word] = i
     return W
 
@@ -414,7 +415,8 @@ if __name__=='__main__':
     idx_word_map=createIndexWordMap(wordMap)
 
     print 'Loading word2vec...'
-    w2v_file = "/Users/pentiumx/Projects/word2vec/GoogleNews-vectors-negative300.bin"
+    #w2v_file = "/Users/pentiumx/Projects/word2vec/GoogleNews-vectors-negative300.bin"
+    w2v_file = "/Users/pentiumx/Projects/ms_scripts/semantic-rntn/word_vectors/glove.6B.200d.txt"
     word_vecs = pd.load_bin_vec(w2v_file, wordMap)
     #word_vecs = dummy_word_vecs()
     #print word_vecs
@@ -425,7 +427,4 @@ if __name__=='__main__':
     print 'word matrix:\n%s' % W
     #print 'word_idx_map:\n%s' % word_idx_map
     pickle.dump([W], open("mr.p", "wb"))
-
     debug_tree(train[0].tree1.root)
-
-
