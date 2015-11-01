@@ -93,10 +93,32 @@ def load_bin_vec(fname, vocab):
                     break
                 if ch != '\n':
                     word.append(ch)
+            if word=='motocross':
+                print 'motocross detected'
             if word in vocab:
-               word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
+                #print word
+                word_vecs[word] = np.fromstring(f.read(binary_len), dtype='float32')
             else:
                 f.read(binary_len)
+    return word_vecs
+
+def load_glove_vec(fname, vocab):
+    """
+    Loads 200x1 word vecs from Glove pre-trained on Wikipedia
+    """
+    word_vecs = {}
+    with open(fname, "rb") as f:
+        header = f.readline()
+        vocab_size, layer1_size = map(int, header.split())
+        binary_len = np.dtype('float32').itemsize * layer1_size
+
+        for line in f.readlines():
+            l = line.split()
+            word = l[0]
+            if word in vocab:
+               word_vecs[word] = l[1:]
+            else:
+                continue
     return word_vecs
 
 def add_unknown_words(word_vecs, vocab, min_df=1, k=300):#k=300
@@ -109,6 +131,7 @@ def add_unknown_words(word_vecs, vocab, min_df=1, k=300):#k=300
         if word == 'motocross':
             print 'debug'
         if word not in word_vecs and vocab[word] >= min_df:
+            print word
             word_vecs[word] = np.random.uniform(-0.25,0.25,k)
             unknown_count+=1
     print 'unknown words count: %s' % unknown_count

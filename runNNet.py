@@ -19,7 +19,7 @@ def run(args=None):
     parser.add_option("--minibatch",dest="minibatch",type="int",default=30)#30
     parser.add_option("--optimizer",dest="optimizer",type="string",
         default="adagrad")
-    parser.add_option("--epochs",dest="epochs",type="int",default=500)#50
+    parser.add_option("--epochs",dest="epochs",type="int",default=50)#50
     parser.add_option("--step",dest="step",type="float",default=1e-2)
 
     #parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
@@ -31,6 +31,7 @@ def run(args=None):
         default="models/test.bin")
     parser.add_option("--data",dest="data",type="string",default="train")
     parser.add_option("--dataset",dest="dataset",type="string",default="sick")
+    #parser.add_option("--dataset",dest="dataset",type="string",default="sick")
 
 
     (opts,args)=parser.parse_args(args)
@@ -59,7 +60,7 @@ def run(args=None):
 
     #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
     # embeddingDim=30 for now
-    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,300,opts.numWords,opts.minibatch)
+    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
     rnn.initParams(W)   # Use W2 for experiments with randomly initialized vectors
 
 
@@ -95,7 +96,7 @@ def test(netFile,data, dataset):
         x = pickle.load(open("mr.p","rb"))
         W = x[0]
         W2 = 0.01*np.random.randn(opts.wvecDim,opts.numWords)
-        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,300,opts.numWords,opts.minibatch)
+        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
         rnn.initParams(W)
         rnn.fromFile(fid)
     print "Testing..."

@@ -52,6 +52,13 @@ class RNNRTE:
         self.dWe = np.empty(self.We.shape)
         self.dbe = np.empty((self.wvecDim))
 
+    def init_softmax_params(self):
+        # Softmax weights
+        self.Ws = 0.01*np.random.randn(self.outputDim,self.wvecDim)
+        self.bs = np.zeros((self.outputDim))
+        # Update stack
+        self.stack = [self.L, self.W, self.b, self.Ws, self.bs, self.Wc, self.bc, self.We, self.be]
+
 
 
     def costAndGrad(self,mbdata,test=False):
@@ -100,7 +107,7 @@ class RNNRTE:
         if test:
             return (1./len(mbdata))*cost,correct,total
 
-        # Back prop each tree in minibatch
+        # Back prop each tree in mini-batch
         for tree_pair in mbdata:
             self.back_prop_all(tree_pair)
 
@@ -109,7 +116,7 @@ class RNNRTE:
         for v in self.dL.itervalues():
             v *=scale
 
-        # Add L2 Regularizations
+        # Add L2 Regularization
         cost += (self.rho/2)*np.sum(self.W**2)
         cost += (self.rho/2)*np.sum(self.Ws**2)
         cost += (self.rho/2)*np.sum(self.Wc**2)
@@ -268,19 +275,21 @@ class RNNRTE:
         if error is not None:
             deltas_local += error
 
-        #if deltas.size != 30:#node.hActs.size != 30:
-        #    print 'test'
         deltas_local *= (node.hActs != 0)
 
 
         # Leaf nodes update word vecs
         if node.isLeaf:
             #self.dL[node.word] += deltas_local
-            deltas = np.dot(self.We.T, deltas_local)
-            deltas_local *= (node.hActs != 0)
+
+            # Calc delta for the embedding transformation layer
+            deltas_local = np.dot(self.We.T, deltas_local)
+            #deltas_local *= (node.hActs != 0)
+            deltas_local *= (self.L[node.word] != 0)
             self.dWe += np.outer(deltas_local,
                     #np.hstack([node.left.hActs, node.right.hActs]))
-                    self.L[node.word]) # this layer has no split
+                    #self.L[node.word]) # this layer has no split
+                    node.hActs) # this layer has no split
             self.dbe += deltas_local
             return
 
@@ -318,7 +327,6 @@ class RNNRTE:
             self.L[:,j] += scale*dL[j]"""
 
     def toFile(self,fid, last=False):
-        import cPickle as pickle
         pickle.dump(self.stack,fid)
         if last:
             print ''
@@ -328,22 +336,22 @@ class RNNRTE:
             #print self.stack[4]
 
     def fromFile(self,fid):
-        import cPickle as pickle
         self.stack = pickle.load(fid)
         #print self.stack
         #print self.stack[0]
         #print self.stack[1]
         #print self.stack[4]
 
+
     def check_grad(self,data,epsilon=1e-6):
 
         cost, grad = self.costAndGrad(data)
 
-        for W,dW in zip(self.stack[1:],grad[1:]):
+        for W,dW in zip(self.stack[1:],grad[1:]):# makes a list of tuple(stack[i], grad[i])
             W = W[...,None] # add dimension since bias is flat
             dW = dW[...,None]
-            for i in xrange(W.shape[0]):
-                for j in xrange(W.shape[1]):
+            for i in xrange(W.shape[0]):#line. E.g. W.shape=(10,20,1)
+                for j in xrange(W.shape[1]):#row
                     W[i,j] += epsilon
                     costP,_ = self.costAndGrad(data)
                     W[i,j] -= epsilon
@@ -368,7 +376,7 @@ class RNNRTE:
 if __name__ == '__main__':
 
     import tree_rte as treeM
-    train,vocab = treeM.loadTrees()
+    train, vocab = treeM.loadTrees()
     numW = len(treeM.loadWordMap())
 
     wvecDim = 10
@@ -377,7 +385,7 @@ if __name__ == '__main__':
 
     x = pickle.load(open("mr.p","rb"))
     W = x[0]
-    rnn = RNNRTE(wvecDim,outputDim,300,numW,mbSize=4)
+    rnn = RNNRTE(wvecDim,outputDim,200,numW,mbSize=4)
     rnn.initParams(W)
 
     mbData = train[:4]
