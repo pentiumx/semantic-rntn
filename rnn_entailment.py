@@ -156,7 +156,7 @@ class RNNRTE:
         #self.probs = probs
         tree_pair.probs = probs
         tree_pair.hActs = hActs
-        if test: print probs
+        #if test: print probs
 
         label = tree_pair.label
 
@@ -166,7 +166,7 @@ class RNNRTE:
     # USED: RNN.forwardProp() will not be called from forward_prop_all()
     # Forward propagate each RNN. Returns the output vector of each sentence!
     def forwardProp(self,node):
-        cost = correct =  total = 0.0
+        cost = correct = total = 0.0
 
         if node.isLeaf:
             # Transform word vector to embeddingTransform layer.
@@ -283,13 +283,14 @@ class RNNRTE:
             #self.dL[node.word] += deltas_local
 
             # Calc delta for the embedding transformation layer
-            deltas_local = np.dot(self.We.T, deltas_local)
+            # the former layer's delta is prolly, already calculated before the recursion??
+            #deltas_local = np.dot(self.We.T, deltas_local)
             #deltas_local *= (node.hActs != 0)
-            deltas_local *= (self.L[node.word] != 0)
+            #deltas_local *= (self.L[node.word] != 0)
             self.dWe += np.outer(deltas_local,
                     #np.hstack([node.left.hActs, node.right.hActs]))
-                    #self.L[node.word]) # this layer has no split
-                    node.hActs) # this layer has no split
+                    self.L[node.word]) # this layer has no split
+                    #node.hActs) # this layer has no split
             self.dbe += deltas_local
             return
 
@@ -336,7 +337,8 @@ class RNNRTE:
             #print self.stack[4]
 
     def fromFile(self,fid):
-        self.stack = pickle.load(fid)
+        # Load params other than word vector dictionary
+        self.stack[1:] = pickle.load(fid)[1:]
         #print self.stack
         #print self.stack[0]
         #print self.stack[1]

@@ -145,10 +145,20 @@ def debug_tree(root):
     graph.write('tree_debug.dot')
 
 
-def loadWordMap():
-    import cPickle as pickle
-    with open('wordMap.bin','r') as fid:
-        return pickle.load(fid)
+def loadWordMap(dataset):
+    if dataset == 'denotation' or dataset=='denotation_sample':
+        with open('wordMap_denotation.bin','r') as fid:
+            return pickle.load(fid)
+    else:
+        with open('wordMap_%s.bin' % dataset,'r') as fid:
+            return pickle.load(fid)
+
+
+# Split a list into evenly sized chunks
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in xrange(0, len(l), n):
+        yield l[i:i+n]
 
 # Get the tree instance of all sentences from the dataset
 def buildWordMap(dataset='sick', data='train_parsed'):
@@ -177,6 +187,68 @@ def buildWordMap(dataset='sick', data='train_parsed'):
     with open('wordMap.bin','w') as fid:
         pickle.dump(wordMap,fid)
 
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in xrange(0, len(l), n):
+        yield l[i:i+n]
+
+def get_lines(dataset, data):
+    file = 'trees/%s_%s' % (dataset, data)
+
+    with open(file,'r') as fid:
+        lines = fid.readlines()
+    return lines
+
+# Build a word map from a very large dataset.
+# To avoid memory problems, load them batch by batch.
+def build_wordmap_with_batch(dataset='sick', data='train_parsed'):
+    """
+    Builds map of all words in training set
+    to integer values.
+    """
+
+    file = 'trees/%s_%s' % (dataset, data)
+    print "Reading trees.."
+
+    lines = []
+    i = 0
+    CHUNK_SIZE = 10000
+    with open(file,'r') as fid:
+        lines = fid.readlines()
+        #l = list(inputarray(fid.readlines(), dataset))
+        #tree_pairs = l
+    current_tree_pairs=[]
+    chunked_lines=list(chunks(lines, CHUNK_SIZE))
+    print len(lines)
+    print len(chunked_lines)
+
+    print "Counting words.."
+    words = collections.defaultdict(int)
+    index=0
+    for chunk in chunked_lines:
+        tree_pairs = list(inputarray(chunk, dataset))
+        i=0
+        for tree_pair in tree_pairs:
+            leftTraverse(tree_pair.tree1.root,nodeFn=countWords,args=words)
+            leftTraverse(tree_pair.tree2.root,nodeFn=countWords,args=words)
+            if i%1000==0: print 'words counted in %d pairs' % (index*CHUNK_SIZE+i)
+            i+=1
+        index+=1
+
+    wordMap = dict(zip(words.iterkeys(),xrange(len(words))))
+    wordMap[UNK] = len(words) # Add unknown as word
+
+
+    with open('wordMap_%s.bin' % dataset,'w') as fid:
+        pickle.dump(wordMap,fid)
+
+# Map words with wordmap
+def map_words_to_trees(tree_pairs, dataset='denotation'):
+    wordMap = loadWordMap(dataset)
+    for tree_pair in tree_pairs:
+        leftTraverse(tree_pair.tree1.root,nodeFn=mapWords,args=wordMap)
+        leftTraverse(tree_pair.tree2.root,nodeFn=mapWords,args=wordMap)
+
 # To get the word that has an arbitrary index.
 def createIndexWordMap(wordMap):
     idx_word_map = []
@@ -199,13 +271,13 @@ def inputarray(lines, dataset='sick'):
             # Note the order of arguments.
             # Change below depends on your RTE dataset.
             yield TreePair(Tree(tmp[1]), Tree(tmp[2]), labels[tmp[0]], tmp[3], tmp[4])
-    elif dataset == 'denotation':
+    elif dataset == 'denotation' or dataset == 'denotation_sample':
         labels = {'ENTAILMENT':0, 'NOT_ENTAILMENT':1}
         i=0
         for l in lines:
             tmp = l.split('\t')
-            if i % 10000 == 0:
-                print 'parsing trees: index=%d'%i
+            #if i % 10000 == 0:
+            #    print 'parsing trees: index=%d'%i
             i+=1
             yield TreePair(Tree(tmp[1]), Tree(tmp[2]), labels[tmp[0]])
 
@@ -231,16 +303,13 @@ def loadTrees(dataset='sick', data='train_parsed'):
     """
     Loads training trees. Maps leaf node words to word ids.
     """
-    wordMap = loadWordMap()
+    wordMap = loadWordMap(dataset)
     file = 'trees/%s_%s' % (dataset, data)
 
-    #file = 'trees/train_parsed_debug'
-    #file = 'trees/train_parsed'
     print file
     print "Reading trees.."
 
     with open(file, 'r') as fid:
-        #trees = [Tree(l) for l in fid.readlines()]
         l = list(inputarray(fid.readlines(), dataset))
         tree_pairs = l
 
@@ -263,8 +332,11 @@ def run(args=None):
     (opts,args)=parser.parse_args(args)
 
     print 'Building word map...'
-    buildWordMap(opts.dataset,'train_parsed')
-    train, wordMap = loadTrees(opts.dataset, 'train_parsed')
+    #buildWordMap(opts.dataset,'train_parsed')
+    build_wordmap_with_batch(opts.dataset, 'train_parsed')
+
+    #train, wordMap = loadTrees(opts.dataset, 'train_parsed')
+    wordMap = loadWordMap(opts.dataset)
     idx_word_map = createIndexWordMap(wordMap)
     print 'vocab size:%s' % len(wordMap)
 
@@ -284,7 +356,7 @@ def run(args=None):
     W = get_W(word_vecs, wordMap, idx_word_map, 200)
     print 'word matrix:\n%s' % W
     #print 'word_idx_map:\n%s' % word_idx_map
-    pickle.dump([W], open("mr.p", "wb"))
+    pickle.dump([W], open("mr_%s.p" % opts.dataset, "wb"))
     #debug_tree(train[0].tree1.root)
 
 
