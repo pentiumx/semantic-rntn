@@ -1,6 +1,6 @@
 import optparse
 import collections
-import pygraphviz as PG
+#import pygraphviz as PG
 import process_data as pd
 import numpy as np
 import cPickle as pickle

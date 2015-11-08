@@ -2,6 +2,9 @@ import numpy as np
 import random
 import tree_rte as tr
 import logging
+import time
+
+RUN_ON_SERVER = False
 
 class SGD:
 
@@ -87,12 +90,19 @@ class SGD:
             if self.it%1 == 0:
                 print "Iter %d : Cost=%.4f, ExpCost=%.4f."%(self.it,cost,self.expcost[-1])
 
+            # consider CPU pressure when running on server.
+            if RUN_ON_SERVER:
+                time.sleep(0.01)
+
             ###############################
             #  Now train from the DG source
             ###############################
             # Update relevant params from the rnn model
             self.model_dg.transfer_params(self.model.stack)
             self.train_denotation(dg_lines, i)
+
+            if RUN_ON_SERVER:
+                time.sleep(0.01)
 
 
     def run(self,trees):
