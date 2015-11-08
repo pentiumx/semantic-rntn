@@ -13,9 +13,8 @@ import numpy as np
 def start(opts):
     print "Loading data..."
     # load training data
-    trees, vocab = tr.loadTrees(opts.dataset,opts.data)
+    trees, vocab = tr.loadTrees(opts.dataset,opts.data) # sick, train_parsed
     opts.numWords = len(tr.loadWordMap(opts.dataset))
-
 
     print "Loading word2vec vectors..."
     # Load pre-built word matrix using cPickle
@@ -23,23 +22,52 @@ def start(opts):
     #word_vecs = process_data.load_bin_vec(w2v_file, vocab)
     #revs, W, W2, word_idx_map, vocab = x[0], x[1], x[2], x[3], x[4]
 
-    x = pickle.load(open("mr_%s.p"%opts.dataset, "rb"))
+    x = pickle.load(open("mr_%s.p" % opts.dataset, "rb"))
     W = x[0]
     W2 = 0.01*np.random.randn(opts.wvecDim,opts.numWords)
 
     #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
     # embeddingDim=200 for now
-    rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
-    rnn.initParams(W)   # Use W2 for experiments with randomly initialized vectors
 
 
-    sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
-        optimizer=opts.optimizer)
+    if opts.use_denotation == 0:
+        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
+        rnn.initParams(W)   # Use W2 for experiments with randomly initialized vectors
+        sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
+            optimizer=opts.optimizer)
+    else:
+        """with open('models/denotation_sample.bin','r') as fid:
+            _ = pickle.load(fid)# skip opts data
+            __ = pickle.load(fid)
+
+            x = pickle.load(open("mr_%s.p" % opts.dg_dataset, "rb"))
+            W_dg = x[0]
+            rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
+            rnn.initParams(W, W_dg)
+            rnn.from_file_denotation(fid)
+
+            sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
+                optimizer=opts.optimizer)"""
+        rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
+        rnn.initParams(W)
+
+        x = pickle.load(open("mr_%s.p" % opts.dg_dataset, "rb"))
+        W_dg = x[0]
+        rnn_dg = nnet_rte.RNNRTE(opts.wvecDim,2,200,opts.numWords,opts.minibatch)
+        rnn_dg.initParams(W_dg)
+
+        sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
+            optimizer=opts.optimizer, model_dg=rnn_dg)
+
 
     for e in range(opts.epochs):
         start = time.time()
         print "Running epoch %d" % e
-        sgd.run(trees)
+        if opts.use_denotation == 0:
+            sgd.run(trees)
+        else:
+            lines = tr.get_lines(opts.dg_dataset, opts.data)
+            sgd.run_using_denotation(trees, lines)
         end = time.time()
         print "Time per epoch : %f"%(end-start)
 
@@ -98,7 +126,7 @@ def run(args=None):
     parser.add_option("--minibatch",dest="minibatch",type="int",default=30)#30
     parser.add_option("--optimizer",dest="optimizer",type="string",
         default="adagrad")
-    parser.add_option("--epochs",dest="epochs",type="int",default=50)#50
+    parser.add_option("--epochs",dest="epochs",type="int",default=500)#50
     parser.add_option("--step",dest="step",type="float",default=1e-2)
 
     #parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
@@ -110,7 +138,8 @@ def run(args=None):
         default="models/test.bin")
     parser.add_option("--data",dest="data",type="string",default="train")
     parser.add_option("--dataset",dest="dataset",type="string",default="sick")
-    #parser.add_option("--dataset",dest="dataset",type="string",default="sick")
+    parser.add_option("--use_denotation",dest="use_denotation",type="int",default=0)
+    parser.add_option("--dg_dataset",dest="dg_dataset",type="string",default='denotation_sample')
 
     (opts,args)=parser.parse_args(args)
 

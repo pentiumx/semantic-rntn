@@ -1,4 +1,8 @@
 import numpy as np
+import theano
+from theano import tensor as T
+from theano import shared
+from theano.tensor.shared_randomstreams import RandomStreams
 import collections
 import rnn as rnn
 import cPickle as pickle
@@ -18,10 +22,19 @@ class RNNRTE:
 
 
     # Init params for the comparison layer
-    def initParams(self, W):
+    def initParams(self, W, W_dg=None):
         # Word vectors
         #self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)# why not [numWords, wvecDim]?
         self.L = W
+        #self.L_dg=W_dg
+        # TODO: Get the flag info from a method argument
+        self.use_dg=False
+        random_seed = 1234
+        self.rng = np.random.RandomState(random_seed)
+        seed = self.rng.randint(2 ** 30)
+        self.srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
+        #self.Ws_dg = 0.01*np.random.randn(2,self.wvecDim)
+        #self.bs_dg = np.zeros(2))
 
         # embedding transformation layer weights
         # embeddingDim = word2vec dim, wvecDim = composition layer's word vec dim.
@@ -59,6 +72,9 @@ class RNNRTE:
         # Update stack
         self.stack = [self.L, self.W, self.b, self.Ws, self.bs, self.Wc, self.bc, self.We, self.be]
 
+    # Update params other than softmax weights and word vectors.
+    def transfer_params(self, stack):
+        self.stack = [self.L, stack[1], stack[2], self.Ws, self.bs, stack[5], stack[6], stack[7], stack[8]]
 
 
     def costAndGrad(self,mbdata,test=False):
@@ -125,6 +141,20 @@ class RNNRTE:
         return scale*cost,[self.dL,scale*(self.dW + self.rho*self.W),scale*self.db,
                            scale*(self.dWs+self.rho*self.Ws),scale*self.dbs,scale*(self.dWc+self.rho*self.Wc),scale*self.dbc,scale*(self.dWe+self.rho*self.We),scale*self.dbe]
 
+    def fast_dropout(rng, x):
+        """ Multiply activations by N(1,1) """
+        seed = rng.randint(2 ** 30)
+        srng = RandomStreams(seed)
+        mask = srng.normal(size=x.shape, avg=1., dtype=theano.config.floatX)
+        return x * mask
+
+    def dropout(self, x, p=0.5):
+        """ Zero-out random values in x with probability p using rng """
+        if p > 0. and p < 1.:
+            mask = self.srng.binomial(n=1, p=1.-p, size=x.shape,
+                    dtype=theano.config.floatX)
+            return x * mask.eval()
+        return x
 
     def forward_prop_all(self, tree_pair, test=False):
         cost = correct =  total = 0.0
@@ -136,11 +166,16 @@ class RNNRTE:
         sent_left = self.forwardProp(tree_pair.tree1.root)
         sent_right = self.forwardProp(tree_pair.tree2.root)
 
+        # > we used dropout (Srivastavaet al., 2014) at the input to the comparison layer (10%)
+        input = [tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]
+        input = self.dropout(np.array(input), 0.1)# convert to ndarray so that we can use dropout
+
+
         # Propagate to the comparison layer.
         # Use the representations!
         # Affine
         hActs = np.dot(self.Wc,
-                np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])) + self.bc
+                np.hstack(input)) + self.bc
                 #np.hstack([sent_left.hActs, sent_right.hActs])) + self.bc
         # Relu
         hActs[hActs<0] = 0
@@ -163,6 +198,8 @@ class RNNRTE:
         return cost - np.log(probs[label]), correct + (np.argmax(probs)==label), total+1
 
 
+
+
     # USED: RNN.forwardProp() will not be called from forward_prop_all()
     # Forward propagate each RNN. Returns the output vector of each sentence!
     def forwardProp(self,node):
@@ -171,7 +208,11 @@ class RNNRTE:
         if node.isLeaf:
             # Transform word vector to embeddingTransform layer.
             #node.hActs = self.L[:,node.word]
+
+            # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
+
             node.hActs = np.dot(self.We, self.L[node.word]) + self.be
+            node.hActs = self.dropout(node.hActs, 0.25)
             node.fprop = True
 
         else:
@@ -344,6 +385,41 @@ class RNNRTE:
         #print self.stack[1]
         #print self.stack[4]
 
+    def from_file_denotation(self, fid):
+        inputs = pickle.load(fid)
+        #self.stack=[]
+        #self.stack = [self.L, self.W, self.b, self.Ws, self.bs, self.Wc, self.bc, self.We, self.be]
+        #self.stack[1:] = pickle.load(fid)[1:]
+        #self.stack = pickle.load(fid)
+
+        # Softmax weights
+        self.Ws = 0.01*np.random.randn(self.outputDim,self.wvecDim)
+        self.bs = np.zeros((self.outputDim))
+
+        self.stack = [self.L, inputs[1], inputs[2], self.Ws, self.bs, inputs[5], inputs[6], inputs[7], inputs[8]]
+        #print self.stack
+        #print self.stack[3]
+        #self.stack[3] = self.Ws
+        #self.stack[4] = self.bs
+
+
+    # 1:W, 2:b, 3:Ws, 4:bs, 5: Wc, 6:bc, 7:We, 8:be
+    def check_single_grad(self,data, index=0, epsilon=1e-6):
+
+        cost, grad = self.costAndGrad(data)
+
+        for W,dW in zip(self.stack[index],grad[index]):
+            W = W[...,None] # add dimension since bias is flat
+            dW = dW[...,None]
+            for i in xrange(W.shape[0]):#line. E.g. W.shape=(10,20,1)
+                for j in xrange(W.shape[1]):#row
+                    W[i,j] += epsilon
+                    costP,_ = self.costAndGrad(data)
+                    W[i,j] -= epsilon
+                    numGrad = (costP - cost)/epsilon
+                    err = np.abs(dW[i,j] - numGrad)
+                    print "Analytic %.9f, Numerical %.9f, Relative Error %.9f"%(dW[i,j],numGrad,err)
+
 
     def check_grad(self,data,epsilon=1e-6):
 
@@ -379,7 +455,7 @@ if __name__ == '__main__':
 
     import tree_rte as treeM
     train, vocab = treeM.loadTrees()
-    numW = len(treeM.loadWordMap())
+    numW = len(treeM.loadWordMap('sick'))
 
     wvecDim = 10
     outputDim = 5
@@ -393,7 +469,9 @@ if __name__ == '__main__':
     mbData = train[:4]
 
     print "Numerical gradient check..."
-    rnn.check_grad(mbData)
+    #rnn.check_grad(mbData)
+    #rnn.check_single_grad(mbData, 7)
+    rnn.check_single_grad(mbData, 8)
 
 
 

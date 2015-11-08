@@ -4,6 +4,8 @@ import rnn as rnn
 
 # RNN for textual entailment task.
 # Compute the word vectors for two sentences, and merge them at the comparison NN layer.
+
+# Using randomly initialized word vectors. (before 11/05/15)
 class RNNRTE:
 
     def __init__(self,wvecDim,outputDim,embeddingDim,numWords,mbSize=30,rho=1e-4):
