@@ -4,6 +4,9 @@ import rnn as rnn
 import cPickle as pickle
 #from pympler import tracker
 
+def tanh_deriv(x):
+    return 1.0 - np.tanh(x)**2
+
 # RNN for textual entailment task.
 # Compute the word vectors for two sentences, and merge them at the comparison NN layer.
 class RNNRTE:
@@ -141,17 +144,7 @@ class RNNRTE:
         return scale*cost,[self.dL,scale*(self.dW + self.rho*self.W),scale*self.db,
                            scale*(self.dWs+self.rho*self.Ws),scale*self.dbs,scale*(self.dWc+self.rho*self.Wc),scale*self.dbc,scale*(self.dWe+self.rho*self.We),scale*self.dbe]
 
-    """ Zero-out random values in x with probability p using rng """
-    """def dropout(self, x, p=0.5):
 
-        if p > 0. and p < 1.:
-            seed = self.rng.randint(2 ** 30)
-            srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
-            mask = srng.binomial(n=1, p=1.-p, size=x.shape,
-                    dtype=theano.config.floatX)
-            return (x * mask).eval()
-        return x
-    """
     def forward_prop_all(self, tree_pair, test=False):
         cost = correct =  total = 0.0
 
@@ -199,15 +192,9 @@ class RNNRTE:
         cost = correct = total = 0.0
 
         if node.isLeaf:
-            # Transform word vector to embeddingTransform layer.
-            #node.hActs = self.L[:,node.word]
-
             # > Before any embedding is used as an input to a recursive layer, it is passed
             # > through an additional tanh neural network layer with the same output dimension as the recursive layer
             node.hActs = np.tanh(np.dot(self.We, self.L[node.word]) + self.be)
-            #node.hActs = self.dropout(node.hActs, 0.25)
-            #alpha,hidden_dim,dropout_percent,do_dropout = (0.5, 4, 0.25,True)
-            #node.hActs *= np.random.binomial([np.ones((len(X), len(node.hActs) ))],1-dropout_percent)[0] * (1.0/(1-dropout_percent))
 
             # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
             node.hActs *= np.random.binomial(1, 1.-0.25, node.hActs.shape)
@@ -230,7 +217,7 @@ class RNNRTE:
             # Relu
             node.hActs[node.hActs<0] = 0
 
-        """"""# Softmax
+        # Softmax
         node.probs = np.dot(self.Ws,node.hActs) + self.bs
         node.probs -= np.max(node.probs)
         node.probs = np.exp(node.probs)
@@ -252,30 +239,24 @@ class RNNRTE:
 
 
         # Comparison layer grad
+        # TODO: Save splitted deltas into a custom comparison layer class
         # derivative of weights(comparison hidden layer)
         # delta_j = h'(a_j)*sigma_k(w_kj*delta_k)
         # delta^(l)=h'(a)*sum(w*delta^(l+1)
         # (for calc) => delta^(l) = W^(l).T * delta^(l+1) (element-wise *) f'(z^(l))
         self.deltas = np.dot(self.Ws.T,self.deltas)
-
-        # TODO: Save splitted deltas into a custom comparison layer class
-        #self.deltas_left = self.deltas[:self.wvecDim]
-        #self.deltas_right = self.deltas[self.wvecDim:]
-        #if self.rnn_left.deltas.size != 30 or self.rnn_right.deltas != 30:
-        #    print 'debug'
-
-        error=None
-        if error is not None:
-            self.deltas += error
         self.deltas *= (tree_pair.hActs != 0)
-        # not a leaf node:
+
+        # dE/dW^(l) = delta^(l+1) * (a^(l))^T + lamda*W^(l)
+        # The regularization will be added later
         self.dWc += np.outer(self.deltas,
                     np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]))
         self.dbc += self.deltas
 
 
-        # added
-        self.deltas = np.dot(self.Wc.T,self.deltas)
+        # Calc deltas at the top layers of the trees
+        self.deltas = np.dot(self.Wc.T, self.deltas)
+
         # NOTE: make sure to create deep copy
         self.deltas_left = np.empty_like(self.deltas[:self.wvecDim])
         self.deltas_left[:] = self.deltas[:self.wvecDim]
@@ -298,30 +279,32 @@ class RNNRTE:
         if error is not None:
             deltas_local += error
 
-        deltas_local *= (node.hActs != 0)
+        # Complete the calculation of delta at the current layer
+        # delta^(l) = W^(l).T * delta^(l+1) (element-wise *) f'(z^(l))
+        if node.isLeaf:
+            deltas_local *= tanh_deriv(node.hActs)
+        else:
+            deltas_local *= (node.hActs != 0)
 
 
         # Leaf nodes update word vecs
         if node.isLeaf:
-            # Calc delta for the embedding transformation layer
-            # the former layer's delta is prolly, already calculated before the recursion??
-            #deltas_local = np.dot(self.We.T, deltas_local)
-            #deltas_local *= (node.hActs != 0)
-            #deltas_local *= (self.L[node.word] != 0)
-            self.dWe += np.outer(deltas_local,
-                    #np.hstack([node.left.hActs, node.right.hActs]))
-                    self.L[node.word]) # this layer has no split
-                    #node.hActs) # this layer has no split
+            # As we've already got the delta of this layer,
+            # calc gradient for the embedding transformation layer
+            self.dWe += np.outer(deltas_local, self.L[node.word])   # this layer has no split
             self.dbe += deltas_local
             return
 
         # Hidden grad
         if not node.isLeaf:
+            # calc gradient for a composition layer
             self.dW += np.outer(deltas_local,
                     np.hstack([node.left.hActs, node.right.hActs]))
             self.db += deltas_local
-            # Error signal to children
-            deltas = np.dot(self.W.T, deltas_local) # deltas.size = wvecDim*2 at this point
+
+            # Error signal to children.
+            # f'(z^(l)) will be multiplied at the begging of the next recursion
+            deltas = np.dot(self.W.T, deltas_local)                 # deltas.size = wvecDim*2 at this point
             self.backProp(node.left, deltas[:self.wvecDim])
             self.backProp(node.right, deltas[self.wvecDim:])
 
@@ -339,9 +322,7 @@ class RNNRTE:
                 dpRMS = np.sqrt(np.mean((scale*dP)**2))
                 print "weight rms=%f -- update rms=%f"%(pRMS,dpRMS)
 
-        #print self.stack[1]
         self.stack[1:] = [P+scale*dP for P,dP in zip(self.stack[1:],update[1:])]
-        #print self.stack[1]
         # handle dictionary update sparsely
         # don't update it while we're using word2vec vectors
         """
@@ -437,9 +418,9 @@ if __name__ == '__main__':
     mbData = train[:4]
 
     print "Numerical gradient check..."
-    #rnn.check_grad(mbData)
+    rnn.check_grad(mbData)
     #rnn.check_single_grad(mbData, 7)
-    rnn.check_single_grad(mbData, 8)
+    #rnn.check_single_grad(mbData, 8)
 
 
 
