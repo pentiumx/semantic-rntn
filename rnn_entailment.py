@@ -32,7 +32,7 @@ class RNNRTE:
         self.use_dg=False
         random_seed = 1234
         self.rng = np.random.RandomState(random_seed)
-         """seed = self.rng.randint(2 ** 30)
+        """seed = self.rng.randint(2 ** 30)
         self.srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
         """
         #self.Ws_dg = 0.01*np.random.randn(2,self.wvecDim)
@@ -176,7 +176,8 @@ class RNNRTE:
 
         # > we used dropout (Srivastavaet al., 2014) at the input to the comparison layer (10%)
         input = np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])
-        input = self.dropout(np.array(input), 0.1)# convert to ndarray so that we can use dropout
+        #input = self.dropout(np.array(input), 0.1)# convert to ndarray so that we can use dropout
+        input *= np.random.binomial(1, 1.-0.1, input.shape)
 
         # Propagate to the comparison layer.
         # Use the representations!
@@ -219,7 +220,10 @@ class RNNRTE:
             # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
             #self.tr.print_diff()
             node.hActs = np.dot(self.We, self.L[node.word]) + self.be
-            node.hActs = self.dropout(node.hActs, 0.25)
+            #node.hActs = self.dropout(node.hActs, 0.25)
+            #alpha,hidden_dim,dropout_percent,do_dropout = (0.5, 4, 0.25,True)
+            #node.hActs *= np.random.binomial([np.ones((len(X), len(node.hActs) ))],1-dropout_percent)[0] * (1.0/(1-dropout_percent))
+            node.hActs *= np.random.binomial(1, 1.-0.25, node.hActs.shape)
             node.fprop = True
             #self.tr.print_diff()
 
