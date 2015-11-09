@@ -6,6 +6,7 @@ from theano.tensor.shared_randomstreams import RandomStreams
 import collections
 import rnn as rnn
 import cPickle as pickle
+#from pympler import tracker
 
 # RNN for textual entailment task.
 # Compute the word vectors for two sentences, and merge them at the comparison NN layer.
@@ -31,8 +32,9 @@ class RNNRTE:
         self.use_dg=False
         random_seed = 1234
         self.rng = np.random.RandomState(random_seed)
-        seed = self.rng.randint(2 ** 30)
+         """seed = self.rng.randint(2 ** 30)
         self.srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
+        """
         #self.Ws_dg = 0.01*np.random.randn(2,self.wvecDim)
         #self.bs_dg = np.zeros(2))
 
@@ -114,12 +116,14 @@ class RNNRTE:
         #self.rnn_right.init_param_grads()
 
         # Forward prop each tree in minibatch
-        for tree_pair in mbdata:
+        for i, tree_pair in enumerate(mbdata):
             c,corr,tot = self.forward_prop_all(tree_pair, test)
 
             cost += c
             correct += corr
             total += tot
+            if test and i % 100 == 0:
+                print i
         if test:
             return (1./len(mbdata))*cost,correct,total
 
@@ -151,9 +155,11 @@ class RNNRTE:
     def dropout(self, x, p=0.5):
         """ Zero-out random values in x with probability p using rng """
         if p > 0. and p < 1.:
-            mask = self.srng.binomial(n=1, p=1.-p, size=x.shape,
+            seed = self.rng.randint(2 ** 30)
+            srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
+            mask = srng.binomial(n=1, p=1.-p, size=x.shape,
                     dtype=theano.config.floatX)
-            return x * mask.eval()
+            return (x * mask).eval()
         return x
 
     def forward_prop_all(self, tree_pair, test=False):
@@ -164,18 +170,19 @@ class RNNRTE:
 
         # sent_left/sent_right: Node class. we need to use sent_left.hActs for using representation!!!
         sent_left = self.forwardProp(tree_pair.tree1.root)
+        #self.tr.print_diff()
         sent_right = self.forwardProp(tree_pair.tree2.root)
+        #self.tr.print_diff()
 
         # > we used dropout (Srivastavaet al., 2014) at the input to the comparison layer (10%)
-        input = [tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]
+        input = np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])
         input = self.dropout(np.array(input), 0.1)# convert to ndarray so that we can use dropout
-
 
         # Propagate to the comparison layer.
         # Use the representations!
         # Affine
         hActs = np.dot(self.Wc,
-                np.hstack(input)) + self.bc
+                input) + self.bc
                 #np.hstack([sent_left.hActs, sent_right.hActs])) + self.bc
         # Relu
         hActs[hActs<0] = 0
@@ -210,10 +217,11 @@ class RNNRTE:
             #node.hActs = self.L[:,node.word]
 
             # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
-
+            #self.tr.print_diff()
             node.hActs = np.dot(self.We, self.L[node.word]) + self.be
             node.hActs = self.dropout(node.hActs, 0.25)
             node.fprop = True
+            #self.tr.print_diff()
 
         else:
             if not node.left.fprop:

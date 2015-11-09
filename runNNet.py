@@ -126,7 +126,7 @@ def run(args=None):
     parser.add_option("--minibatch",dest="minibatch",type="int",default=30)#30
     parser.add_option("--optimizer",dest="optimizer",type="string",
         default="adagrad")
-    parser.add_option("--epochs",dest="epochs",type="int",default=500)#50
+    parser.add_option("--epochs",dest="epochs",type="int",default=50)#50
     parser.add_option("--step",dest="step",type="float",default=1e-2)
 
     #parser.add_option("--outputDim",dest="outputDim",type="int",default=5)
