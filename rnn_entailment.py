@@ -1,8 +1,4 @@
 import numpy as np
-import theano
-from theano import tensor as T
-from theano import shared
-from theano.tensor.shared_randomstreams import RandomStreams
 import collections
 import rnn as rnn
 import cPickle as pickle
@@ -145,15 +141,9 @@ class RNNRTE:
         return scale*cost,[self.dL,scale*(self.dW + self.rho*self.W),scale*self.db,
                            scale*(self.dWs+self.rho*self.Ws),scale*self.dbs,scale*(self.dWc+self.rho*self.Wc),scale*self.dbc,scale*(self.dWe+self.rho*self.We),scale*self.dbe]
 
-    def fast_dropout(rng, x):
-        """ Multiply activations by N(1,1) """
-        seed = rng.randint(2 ** 30)
-        srng = RandomStreams(seed)
-        mask = srng.normal(size=x.shape, avg=1., dtype=theano.config.floatX)
-        return x * mask
+    """ Zero-out random values in x with probability p using rng """
+    """def dropout(self, x, p=0.5):
 
-    def dropout(self, x, p=0.5):
-        """ Zero-out random values in x with probability p using rng """
         if p > 0. and p < 1.:
             seed = self.rng.randint(2 ** 30)
             srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
@@ -161,7 +151,7 @@ class RNNRTE:
                     dtype=theano.config.floatX)
             return (x * mask).eval()
         return x
-
+    """
     def forward_prop_all(self, tree_pair, test=False):
         cost = correct =  total = 0.0
 
@@ -170,9 +160,7 @@ class RNNRTE:
 
         # sent_left/sent_right: Node class. we need to use sent_left.hActs for using representation!!!
         sent_left = self.forwardProp(tree_pair.tree1.root)
-        #self.tr.print_diff()
         sent_right = self.forwardProp(tree_pair.tree2.root)
-        #self.tr.print_diff()
 
         # > we used dropout (Srivastavaet al., 2014) at the input to the comparison layer (10%)
         input = np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])
@@ -205,9 +193,6 @@ class RNNRTE:
 
         return cost - np.log(probs[label]), correct + (np.argmax(probs)==label), total+1
 
-
-
-
     # USED: RNN.forwardProp() will not be called from forward_prop_all()
     # Forward propagate each RNN. Returns the output vector of each sentence!
     def forwardProp(self,node):
@@ -217,15 +202,16 @@ class RNNRTE:
             # Transform word vector to embeddingTransform layer.
             #node.hActs = self.L[:,node.word]
 
-            # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
-            #self.tr.print_diff()
-            node.hActs = np.dot(self.We, self.L[node.word]) + self.be
+            # > Before any embedding is used as an input to a recursive layer, it is passed
+            # > through an additional tanh neural network layer with the same output dimension as the recursive layer
+            node.hActs = np.tanh(np.dot(self.We, self.L[node.word]) + self.be)
             #node.hActs = self.dropout(node.hActs, 0.25)
             #alpha,hidden_dim,dropout_percent,do_dropout = (0.5, 4, 0.25,True)
             #node.hActs *= np.random.binomial([np.ones((len(X), len(node.hActs) ))],1-dropout_percent)[0] * (1.0/(1-dropout_percent))
+
+            # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
             node.hActs *= np.random.binomial(1, 1.-0.25, node.hActs.shape)
             node.fprop = True
-            #self.tr.print_diff()
 
         else:
             if not node.left.fprop:
@@ -291,34 +277,18 @@ class RNNRTE:
         # added
         self.deltas = np.dot(self.Wc.T,self.deltas)
         # NOTE: make sure to create deep copy
-        """self.rnn_left.deltas = np.empty_like(self.deltas[:self.wvecDim])
-        self.rnn_left.deltas[:] = self.deltas[:self.wvecDim]
-        self.rnn_right.deltas = np.empty_like(self.deltas[self.wvecDim:])
-        self.rnn_right.deltas[:] = self.deltas[self.wvecDim:]
-
-        # Composition layers grad. dL, dW, db will be calculated.
-        self.rnn_left.backProp(tree_pair.tree1.root)
-        self.rnn_right.backProp(tree_pair.tree2.root)"""
         self.deltas_left = np.empty_like(self.deltas[:self.wvecDim])
         self.deltas_left[:] = self.deltas[:self.wvecDim]
         self.deltas_right = np.empty_like(self.deltas[self.wvecDim:])
         self.deltas_right[:] = self.deltas[self.wvecDim:]
 
         # Composition layers grad. dL, dW, db will be calculated.
-        self.backProp(tree_pair.tree1.root,self.deltas_left)
-        self.backProp(tree_pair.tree2.root,self.deltas_right)
+        self.backProp(tree_pair.tree1.root, self.deltas_left)
+        self.backProp(tree_pair.tree2.root, self.deltas_right)
 
     def backProp(self,node,deltas,error=None):
-
         # Clear nodes
         node.fprop = False
-
-        """# Softmax grad
-        deltas = node.probs
-        deltas[node.label] -= 1.0
-        self.dWs += np.outer(deltas,node.hActs)
-        self.dbs += deltas
-        deltas = np.dot(self.Ws.T,deltas)"""
 
         # self.deltas is already calculated
         # [NOTE: DO NOT assign the instance itself. make sure to create a deep copied value!!!]
@@ -333,8 +303,6 @@ class RNNRTE:
 
         # Leaf nodes update word vecs
         if node.isLeaf:
-            #self.dL[node.word] += deltas_local
-
             # Calc delta for the embedding transformation layer
             # the former layer's delta is prolly, already calculated before the recursion??
             #deltas_local = np.dot(self.We.T, deltas_local)
@@ -376,43 +344,30 @@ class RNNRTE:
         #print self.stack[1]
         # handle dictionary update sparsely
         # don't update it while we're using word2vec vectors
-        """dL = update[0]
+        """
+        dL = update[0]
         for j in dL.iterkeys():
-            self.L[:,j] += scale*dL[j]"""
+            self.L[:,j] += scale*dL[j]
+        """
 
     def toFile(self,fid, last=False):
         pickle.dump(self.stack,fid)
         if last:
             print ''
-            #print self.stack[0][:,467]
-            #print self.stack[0]
-            #print self.stack[1]
-            #print self.stack[4]
 
     def fromFile(self,fid):
         # Load params other than word vector dictionary
         self.stack[1:] = pickle.load(fid)[1:]
-        #print self.stack
-        #print self.stack[0]
-        #print self.stack[1]
-        #print self.stack[4]
 
+    # NOT USED
     def from_file_denotation(self, fid):
         inputs = pickle.load(fid)
-        #self.stack=[]
-        #self.stack = [self.L, self.W, self.b, self.Ws, self.bs, self.Wc, self.bc, self.We, self.be]
-        #self.stack[1:] = pickle.load(fid)[1:]
-        #self.stack = pickle.load(fid)
 
         # Softmax weights
         self.Ws = 0.01*np.random.randn(self.outputDim,self.wvecDim)
         self.bs = np.zeros((self.outputDim))
-
         self.stack = [self.L, inputs[1], inputs[2], self.Ws, self.bs, inputs[5], inputs[6], inputs[7], inputs[8]]
-        #print self.stack
-        #print self.stack[3]
-        #self.stack[3] = self.Ws
-        #self.stack[4] = self.bs
+
 
 
     # 1:W, 2:b, 3:Ws, 4:bs, 5: Wc, 6:bc, 7:We, 8:be
@@ -451,7 +406,8 @@ class RNNRTE:
 
         # This model uses word2vec
         # check dL separately since dict
-        """dL = grad[0]
+        """
+        dL = grad[0]
         L = self.stack[0]
         for j in dL.iterkeys():
             for i in xrange(L.shape[0]):
