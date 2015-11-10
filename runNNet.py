@@ -49,12 +49,12 @@ def start(opts):
             sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
                 optimizer=opts.optimizer)"""
         rnn = nnet_rte.RNNRTE(opts.wvecDim,opts.outputDim,200,opts.numWords,opts.minibatch)
-        rnn.initParams(W)
+        rnn.initParams(W, True)
 
         x = pickle.load(open("mr_%s.p" % opts.dg_dataset, "rb"))
         W_dg = x[0]
         rnn_dg = nnet_rte.RNNRTE(opts.wvecDim,2,200,opts.numWords,opts.minibatch)
-        rnn_dg.initParams(W_dg)
+        rnn_dg.initParams(W_dg, True)
 
         sgd = optimizer.SGD(rnn,alpha=opts.step,minibatch=opts.minibatch,
             optimizer=opts.optimizer, model_dg=rnn_dg)
@@ -165,6 +165,7 @@ def test(netFile,data, dataset):
         _ = pickle.load(fid)
         #rnn = nnet.RNN(opts.wvecDim,opts.outputDim,opts.numWords,opts.minibatch)
 
+        print 'Reading word vectors...'
         x = pickle.load(open("mr_%s.p" % dataset,"rb"))
         W = x[0]
         W2 = 0.01*np.random.randn(opts.wvecDim,opts.numWords)

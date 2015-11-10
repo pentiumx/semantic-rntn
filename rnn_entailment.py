@@ -22,20 +22,13 @@ class RNNRTE:
 
 
     # Init params for the comparison layer
-    def initParams(self, W, W_dg=None):
+    def initParams(self, W, dropout=False):
         # Word vectors
         #self.L = 0.01*np.random.randn(self.wvecDim,self.numWords)# why not [numWords, wvecDim]?
         self.L = W
-        #self.L_dg=W_dg
-        # TODO: Get the flag info from a method argument
-        self.use_dg=False
+        self.dropout = dropout
         random_seed = 1234
         self.rng = np.random.RandomState(random_seed)
-        """seed = self.rng.randint(2 ** 30)
-        self.srng = theano.tensor.shared_randomstreams.RandomStreams(seed)
-        """
-        #self.Ws_dg = 0.01*np.random.randn(2,self.wvecDim)
-        #self.bs_dg = np.zeros(2))
 
         # embedding transformation layer weights
         # embeddingDim = word2vec dim, wvecDim = composition layer's word vec dim.
@@ -152,20 +145,22 @@ class RNNRTE:
         # TODO: do some additional initializations to each rnn's parameters?
 
         # sent_left/sent_right: Node class. we need to use sent_left.hActs for using representation!!!
-        sent_left = self.forwardProp(tree_pair.tree1.root)
-        sent_right = self.forwardProp(tree_pair.tree2.root)
+        sent_left = self.forwardProp(tree_pair.tree1.root, test)
+        sent_right = self.forwardProp(tree_pair.tree2.root, test)
 
         # > we used dropout (Srivastavaet al., 2014) at the input to the comparison layer (10%)
         input = np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])
-        #input = self.dropout(np.array(input), 0.1)# convert to ndarray so that we can use dropout
-        input *= np.random.binomial(1, 1.-0.1, input.shape)
+        if self.dropout and not test:
+            input *= np.random.binomial(1, 1.-0.1, input.shape)
 
         # Propagate to the comparison layer.
         # Use the representations!
         # Affine
-        hActs = np.dot(self.Wc,
-                input) + self.bc
-                #np.hstack([sent_left.hActs, sent_right.hActs])) + self.bc
+        if self.dropout and test:
+            # >  At test time, the weights are scaled as W^(l)test = pW^(l)
+            hActs = np.dot(self.Wc*(1.-0.1), input) + self.bc
+        else:
+            hActs = np.dot(self.Wc, input) + self.bc
         # Relu
         hActs[hActs<0] = 0
 
@@ -177,10 +172,8 @@ class RNNRTE:
 
         # TODO: Create a class for softmax layer
         # Save softmax layer values as member vars (temporary solution)
-        #self.probs = probs
         tree_pair.probs = probs
         tree_pair.hActs = hActs
-        #if test: print probs
 
         label = tree_pair.label
 
@@ -188,26 +181,30 @@ class RNNRTE:
 
     # USED: RNN.forwardProp() will not be called from forward_prop_all()
     # Forward propagate each RNN. Returns the output vector of each sentence!
-    def forwardProp(self,node):
+    def forwardProp(self,node, test=False):
         cost = correct = total = 0.0
 
         if node.isLeaf:
             # > Before any embedding is used as an input to a recursive layer, it is passed
             # > through an additional tanh neural network layer with the same output dimension as the recursive layer
-            node.hActs = np.tanh(np.dot(self.We, self.L[node.word]) + self.be)
+            if self.dropout and test:
+                node.hActs = np.tanh(np.dot(self.We*(1.-0.25), self.L[node.word]) + self.be)
+            else:
+                node.hActs = np.tanh(np.dot(self.We, self.L[node.word]) + self.be)
 
             # > we used dropout (Srivastavaet al., 2014) ... at the output from the embedding transform layer (25%)
-            node.hActs *= np.random.binomial(1, 1.-0.25, node.hActs.shape)
+            if self.dropout and not test:
+                node.hActs *= np.random.binomial(1, 1.-0.25, node.hActs.shape)
             node.fprop = True
 
         else:
             if not node.left.fprop:
-                c,corr,tot = self.forwardProp(node.left)
+                c,corr,tot = self.forwardProp(node.left, test)
                 cost += c
                 correct += corr
                 total += tot
             if not node.right.fprop:
-                c,corr,tot = self.forwardProp(node.right)
+                c,corr,tot = self.forwardProp(node.right, test)
                 cost += c
                 correct += corr
                 total += tot
@@ -236,9 +233,6 @@ class RNNRTE:
         # dE/dw = delta*z = deltas*hActs
         self.dWs += np.outer(self.deltas, tree_pair.hActs)
         self.dbs += self.deltas
-
-
-        # Comparison layer grad
         # TODO: Save splitted deltas into a custom comparison layer class
         # derivative of weights(comparison hidden layer)
         # delta_j = h'(a_j)*sigma_k(w_kj*delta_k)
@@ -247,14 +241,20 @@ class RNNRTE:
         self.deltas = np.dot(self.Ws.T,self.deltas)
         self.deltas *= (tree_pair.hActs != 0)
 
+        # Comparison layer grad
+        #self.dWe += np.dot(np.atleast_2d(deltas_local).T, np.atleast_2d(self.L[node.word]))
+        #self.dbe += deltas_local
         # dE/dW^(l) = delta^(l+1) * (a^(l))^T + lamda*W^(l)
         # The regularization will be added later
-        self.dWc += np.outer(self.deltas,
-                    np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]))
+
+        # This layer isn't a recursive layer, so perhaps I shouldn't use outer product?
+        #self.dWc += np.outer(self.deltas, np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs]))
+        self.dWc += np.dot(np.atleast_2d(self.deltas).T, np.atleast_2d(np.hstack([tree_pair.tree1.root.hActs, tree_pair.tree2.root.hActs])) )
         self.dbc += self.deltas
 
 
         # Calc deltas at the top layers of the trees
+        # delta^(l) = W^(l).T * delta^(l+1) (element-wise *) f'(z^(l))
         self.deltas = np.dot(self.Wc.T, self.deltas)
 
         # NOTE: make sure to create deep copy
@@ -282,16 +282,29 @@ class RNNRTE:
         # Complete the calculation of delta at the current layer
         # delta^(l) = W^(l).T * delta^(l+1) (element-wise *) f'(z^(l))
         if node.isLeaf:
-            deltas_local *= tanh_deriv(node.hActs)
+            deltas_local *= (node.hActs != 0)
         else:
             deltas_local *= (node.hActs != 0)
 
 
         # Leaf nodes update word vecs
         if node.isLeaf:
-            # As we've already got the delta of this layer,
-            # calc gradient for the embedding transformation layer
-            self.dWe += np.outer(deltas_local, self.L[node.word])   # this layer has no split
+            # original:
+            #self.dL[node.word] += deltas
+            # leaf nodes have no split
+            #self.dW += np.outer(deltas_local, node.hActs)
+            #self.db += deltas_local
+
+            # NOW we compute the gradients of the embedding transformation layer
+            #delta = np.dot(self.We.T, deltas_local)
+            #delta *= tanh_deriv(self.L[node.word])
+
+            #delta = np.atleast_2d(delta)
+            #self.dWe += np.outer(deltas, self.L[node.word])
+            #self.dWe += np.dot(np.atleast_2d(node.hActs).T, np.atleast_2d(delta))
+
+            # deltas_local IS ALREADY the delta of this hidden layer.
+            self.dWe += np.dot(np.atleast_2d(deltas_local).T, np.atleast_2d(self.L[node.word]))
             self.dbe += deltas_local
             return
 
@@ -304,7 +317,10 @@ class RNNRTE:
 
             # Error signal to children.
             # f'(z^(l)) will be multiplied at the begging of the next recursion
-            deltas = np.dot(self.W.T, deltas_local)                 # deltas.size = wvecDim*2 at this point
+            if node.left.isLeaf:
+                deltas = np.dot(self.W.T, deltas_local)                 # deltas.size = wvecDim*2 at this point
+            else:
+                deltas = np.dot(self.W.T, deltas_local)                 # deltas.size = wvecDim*2 at this point
             self.backProp(node.left, deltas[:self.wvecDim])
             self.backProp(node.right, deltas[self.wvecDim:])
 
@@ -352,30 +368,16 @@ class RNNRTE:
 
 
     # 1:W, 2:b, 3:Ws, 4:bs, 5: Wc, 6:bc, 7:We, 8:be
-    def check_single_grad(self,data, index=0, epsilon=1e-6):
-
-        cost, grad = self.costAndGrad(data)
-
-        for W,dW in zip(self.stack[index],grad[index]):
-            W = W[...,None] # add dimension since bias is flat
-            dW = dW[...,None]
-            for i in xrange(W.shape[0]):#line. E.g. W.shape=(10,20,1)
-                for j in xrange(W.shape[1]):#row
-                    W[i,j] += epsilon
-                    costP,_ = self.costAndGrad(data)
-                    W[i,j] -= epsilon
-                    numGrad = (costP - cost)/epsilon
-                    err = np.abs(dW[i,j] - numGrad)
-                    print "Analytic %.9f, Numerical %.9f, Relative Error %.9f"%(dW[i,j],numGrad,err)
-
-
     def check_grad(self,data,epsilon=1e-6):
 
         cost, grad = self.costAndGrad(data)
-
+        wegihts= ['W', 'b', 'Ws', 'bs', 'Wc', 'bc', 'We', 'be']
+        index = 0
         for W,dW in zip(self.stack[1:],grad[1:]):# makes a list of tuple(stack[i], grad[i])
             W = W[...,None] # add dimension since bias is flat
             dW = dW[...,None]
+            print wegihts[index]
+            index += 1
             for i in xrange(W.shape[0]):#line. E.g. W.shape=(10,20,1)
                 for j in xrange(W.shape[1]):#row
                     W[i,j] += epsilon
